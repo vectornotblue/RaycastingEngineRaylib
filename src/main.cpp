@@ -3,28 +3,25 @@
 #include <vector>
 #include <cmath>
 
-#define wallSize cellSize
-#define rows 24
-#define cols 24
-#define worldX cols*cellSize
-#define worldY rows*cellSize
+constexpr int rows = 24;
+constexpr int cols = 24;
 bool MinimapMode = true;
-
-int screenWidth = 1080;
-int screenHeight = 1080;
-int cellSize = screenHeight/rows;
+constexpr int screenWidth = 1080;
+constexpr int screenHeight = 1080;
+constexpr int cellSize = screenHeight/rows;
+constexpr int wallSize  = cellSize;
 constexpr int FPS = 30; 
 constexpr int miniFPS = 15;
-float miniScale = 0.25f;
-float miniMapWidth = (float)screenWidth*miniScale;
-float miniMapHeight = (float)screenHeight*miniScale;
-float miniMapX = screenWidth - miniMapWidth - 20.0f;
-float miniMapY = 20.0f;
+constexpr float miniScale = 0.25f;
+constexpr float miniMapWidth = (float)screenWidth*miniScale;
+constexpr float miniMapHeight = (float)screenHeight*miniScale;
+constexpr float miniMapX = screenWidth - miniMapWidth - 20.0f;
+constexpr float miniMapY = 20.0f;
 constexpr float FOV = 60 * DEG2RAD;
 float pPlane = (screenWidth/2.0f)/tanf(FOV/2.0f);
-constexpr int RES = 6;
-int rayCount = screenWidth/RES;
-constexpr int maxRaySteps = 30;
+constexpr int RES = 7;
+constexpr int rayCount = screenWidth/RES;
+constexpr int maxRaySteps = 100;
 float NormalizeAngle(float angle){
     angle = fmod(angle,2*PI);
     if(angle<0) angle+= 2*PI;
@@ -41,7 +38,7 @@ struct Vector2Int{
 Color bgColor = {30,30,100,250};
 
 //grid
-int grid[rows][cols] = {
+constexpr int grid[rows][cols] = {
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
     {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1},
     {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1},
@@ -72,15 +69,9 @@ enum gridValues{
     Wall = 1
 };
 bool GridHasValueAtPos(int value, Vector2Int pos /*in rowcol*/){
-    int gridPosX = pos.x;
-    int gridPosY = pos.y;
-    if(gridPosX >= cols || gridPosY >= rows){
-        return false;
-    }
-    if(gridPosX<0 || gridPosY <0){
-        return false;
-    }
-    if(grid[gridPosY][gridPosX] == value){
+    if( pos.x >= 0 && pos.y >= 0 &&
+        pos.x <cols && pos.y < rows &&
+        grid[pos.y][pos.x] == value){
         return true;
     }
     return false;
@@ -99,38 +90,42 @@ void DrawGrid(){
 };
 
 //player
-float turnSpeed = .003f, moveSpeed = 200.0f, shiftSpeed = 500.0f;
+class Player{
+    private:    
+        float size = 5;
+        Color color = RED;
+        float turnSpeed = .003f, moveSpeed = 200.0f, shiftSpeed = 500.0f;
+public:
 
-Vector2 playerMoveDir;
-Vector2 playerPos = {screenWidth/2, screenHeight/2};
-float playerAngle = -PI;
-float playerRadius = 5;
-Color playerColor = RED;
-float miniPosX;
-float miniPosY;
-void DrawPlayer(){
-    miniPosX = miniScale * playerPos.x;
-    miniPosY = miniScale * playerPos.y;
-    DrawCircle(miniPosX,miniPosY, playerRadius, playerColor);
-    //DrawLineEx(pos, {pos.x+cellSize*dir.x, pos.y+dir.y*cellSize}, 3, RED);
-}
-void MovePlayer(float dt, bool shift){
-    float currentSpeed = shift ? shiftSpeed : moveSpeed;
-    float offset = 90*DEG2RAD;
-    playerMoveDir = Vector2Rotate(playerMoveDir, playerAngle+ offset);
-    playerPos.x += playerMoveDir.x * currentSpeed * dt;
-    playerPos.y += playerMoveDir.y * currentSpeed * dt;
-    if(GridHasValueAtPos(Wall, {int(playerPos.x/cellSize), int(playerPos.y/cellSize)})){
-        playerPos.x -= playerMoveDir.x * currentSpeed * dt;
-    playerPos.y -= playerMoveDir.y * currentSpeed * dt;
+    Vector2 pos = {screenWidth/2, screenHeight/2}, dir;
+    float angle = -PI;
+
+    void DrawPlayer(){
+        float miniPosX = miniScale * pos.x;
+        float miniPosY = miniScale * pos.y;
+        DrawCircle(miniPosX,miniPosY, size, color);
+        //DrawLineEx(pos, {pos.x+cellSize*dir.x, pos.y+dir.y*cellSize}, 3, RED);
     }
-}
-void RotatePlayer(float mouseD){
-    float angleChange = mouseD * turnSpeed;
-    playerAngle += angleChange;
-    playerAngle = NormalizeAngle(playerAngle);
-    
-}
+    void MovePlayer(Vector2 moveDir, float dt, bool shift){
+        float currentSpeed = shift ? shiftSpeed : moveSpeed;
+        float offset = 90*DEG2RAD;
+        moveDir = Vector2Rotate(moveDir, angle + offset);
+        pos.x += moveDir.x * currentSpeed * dt;
+        //Collision Check
+        if(GridHasValueAtPos(Wall, {int(pos.x/cellSize), int(pos.y/cellSize)})){
+            pos.x -= moveDir.x * currentSpeed * dt;
+        }
+        pos.y += moveDir.y * currentSpeed * dt;
+        if(GridHasValueAtPos(Wall, {int(pos.x/cellSize), int(pos.y/cellSize)})){
+            pos.y -= moveDir.y * currentSpeed * dt;
+        }
+    }
+    void RotatePlayer(float mouseD){
+        float angleChange = mouseD * turnSpeed;
+        angle += angleChange;
+        angle = NormalizeAngle(angle);
+    }
+};
 
 //rays
 Color rayColor = WHITE;
@@ -142,12 +137,14 @@ struct Ray2D{
     Vector2Int step;
     int currentStep;
     bool horWallHit = false, verWallHit = false;
-    void Draw(){
+    void Draw(const Player& player){
+        float miniPosX = player.pos.x * miniScale;
+        float miniPosY = player.pos.y * miniScale;
         float miniLength = length * miniScale;
         DrawLineEx({miniPosX, miniPosY}, {miniPosX+dir.x*miniLength, miniPosY+dir.y*miniLength}, 1, rayColor);
     }
-    void DrawBar(int i){
-        float lengthPerp = length * cosf(angle-playerAngle);
+    void DrawBar(const Player& player, int i){
+        float lengthPerp = length * cosf(angle-player.angle);
         float xpos = i*RES;
         float BarSize = (wallSize/lengthPerp) * pPlane;
         unsigned char barColorValue = (Clamp(2*BarSize/screenHeight, 0.0001f, 1.0f))*255;
@@ -159,8 +156,19 @@ struct Ray2D{
         step.x = (dir.x>=0) ? 1 : -1;
         step.y = (dir.y>=0) ? 1 : -1;
     }
-    float XDist, YDist, deltaXDist, deltaYDist; // firstDist for distance to first point, deltaDist between all others
-    void DDA(){
+
+    void Cast(){
+        float XDist, YDist, deltaXDist, deltaYDist; // firstDist for distance to first point, deltaDist between all others
+
+        gridPos = {int(pos.x/cellSize), int(pos.y/cellSize)};
+        FindStep();
+        deltaXDist = (dir.x == 0.0f) ? INFINITY : fabsf(1.0f/dir.x);
+        deltaYDist = (dir.y == 0.0f) ? INFINITY : fabsf(1.0f/dir.y);
+        XDist = (gridPos.x-pos.x/cellSize) * step.x + .5f + step.x/2.0f;
+        XDist *= deltaXDist;
+        YDist = (gridPos.y-pos.y/cellSize) * step.y + .5f + step.y/2.0f;
+        YDist *= deltaYDist;
+        //DDA
         horWallHit = verWallHit = false;
         currentStep = 0;
         while(!verWallHit && !horWallHit && currentStep < maxRaySteps){
@@ -181,41 +189,40 @@ struct Ray2D{
             length = (YDist-deltaYDist) *cellSize;
         }
     }
-    void Cast(){
-        
-        gridPos = {int(pos.x/cellSize), int(pos.y/cellSize)};
-        FindStep();
-        deltaXDist = (dir.x == 0.0f) ? INFINITY : fabsf(1.0f/dir.x);
-        deltaYDist = (dir.y == 0.0f) ? INFINITY : fabsf(1.0f/dir.y);
-        XDist = (gridPos.x-pos.x/cellSize) * step.x + .5f + step.x/2.0f;
-        XDist *= deltaXDist;
-        YDist = (gridPos.y-pos.y/cellSize) * step.y + .5f + step.y/2.0f;
-        YDist *= deltaYDist;
-        DDA();
-    }
     
 };
 std::vector<Ray2D> rays(rayCount);
-float firstRayAngle = 0.5f*(-FOV);
-float addRayAngle = FOV * 1.0f / rayCount;
-void RayCast(){
-    for(int i = 0; i < rayCount; i++){
-        rays[i].pos = playerPos;
-        float rayAngle = NormalizeAngle(playerAngle + firstRayAngle + addRayAngle*i); 
-        rays[i].angle = rayAngle;
-        rays[i].dir = {cosf(rayAngle), sinf(rayAngle)};
-        rays[i].Cast();
+float firstRayOffset = 0.5f*(-FOV);
+const float addRayAngle = FOV * 1.0f / rayCount;
+void RayCast(const Player& player){
+    float currentRayAngle = firstRayOffset + player.angle;
+    float currentCos = cosf(currentRayAngle);
+    float currentSin = sinf(currentRayAngle);
+    const float deltaCos = cosf(addRayAngle);
+    const float deltaSin = sinf(addRayAngle);
+    for(Ray2D& ray : rays){
+        ray.pos = player.pos;
+        ray.angle = currentRayAngle;
+        ray.dir = {currentCos, currentSin};
+        float tempCos = currentCos * deltaCos - currentSin * deltaSin;
+        float tempSin = currentCos * deltaSin + currentSin * deltaCos;
+        currentCos = tempCos;
+        currentSin = tempSin;
+        ray.Cast();
+        currentRayAngle += addRayAngle;
     }
     
 }
-void DrawRays(){
-    for(int i = 0; i < rayCount; i+= 1.0f/miniScale){
-        rays[i].Draw();
+void DrawRays(const Player& player){
+    constexpr int minRayCount = 20;
+    constexpr int miniStep = rayCount/minRayCount ;
+    for(int i = 0; i < rayCount; i+= miniStep){
+        rays[i].Draw(player);
     }
 }
-void DrawRayBars(){
+void DrawRayBars(const Player& player){
     for(int i = 0; i < rayCount; i++){
-        rays[i].DrawBar(i);
+        rays[i].DrawBar(player, i);
     }
 }
 
@@ -224,10 +231,9 @@ void DrawRayBars(){
 
 int main() 
 {   
-    
     InitWindow(screenWidth, screenHeight, "Raylib Raycast Engine");
     RenderTexture2D minimapTexture = LoadRenderTexture(miniMapWidth, miniMapHeight);
-    
+    Player player;
     HideCursor();
     SetTargetFPS(FPS);
     int frame = 0;
@@ -244,18 +250,20 @@ int main()
         Vector2 middle = { screenWidth*0.5f, screenHeight*0.5f};
         Vector2 mousePos = GetMousePosition();
         Vector2 mouseDelta = Vector2Subtract(mousePos, middle);
-        RotatePlayer(mouseDelta.x);
-        SetMousePosition((int)middle.x, (int)middle.y);    
-        playerMoveDir.x = (((IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) - (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A))));
-        playerMoveDir.y = (((IsKeyDown(KEY_DOWN)|| IsKeyDown(KEY_S)) - (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W))));
-        IsKeyDown(KEY_LEFT_SHIFT) ? MovePlayer(deltaTime, true) : MovePlayer(deltaTime, false);
-        RayCast();
+        player.RotatePlayer(mouseDelta.x);
+        SetMousePosition((int)middle.x, (int)middle.y); 
+        Vector2 moveDir;   
+        moveDir.x = (((IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) - (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A))));
+        moveDir.y = (((IsKeyDown(KEY_DOWN)|| IsKeyDown(KEY_S)) - (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W))));
+        moveDir = Vector2Normalize(moveDir);
+        IsKeyDown(KEY_LEFT_SHIFT) ? player.MovePlayer(moveDir, deltaTime, true) : player.MovePlayer(moveDir, deltaTime, false);
+        RayCast(player);
         if(MinimapMode && (frame % FPS/miniFPS) == 0){
             BeginTextureMode(minimapTexture);
             ClearBackground(BLACK);
             DrawGrid();
-            DrawPlayer();
-            DrawRays();
+            player.DrawPlayer();
+            DrawRays(player);
             EndTextureMode();
             frame = 0;
         };
@@ -264,7 +272,7 @@ int main()
             ClearBackground(BLACK);
             DrawRectangleGradientV(0,0, screenWidth, screenHeight/2.0f, bgColor, BLACK);
             DrawRectangleGradientV(0,screenHeight/2.0f,screenWidth, screenHeight/2.0f, BLACK, bgColor);
-            DrawRayBars();
+            DrawRayBars(player);
             DrawTextureRec(minimapTexture.texture, Rectangle{0, 0, miniMapWidth, -miniMapHeight}, {miniMapX, miniMapY}, WHITE);
             //Vector2Int mousePos = {GetMousePosition().x/cellSize, GetMousePosition().y/cellSize};
             //DrawText(GridHasValueAtPos(Wall, mousePos) ? "true" : "false", 10, 10, 20, RED);
